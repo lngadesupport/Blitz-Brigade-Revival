@@ -53,11 +53,11 @@ Mensagens variáveis usam:
 | 3 | CLIENT_DETAILS / JOIN | estrutura-base reconstruída; payload real ainda deve ser capturado |
 | 5 | LOBBY_LIST | envelope reconstruído |
 | 6 | REQ_CLOCK | identificado |
-| 7 | SEND_CLOCK | identificado |
-| 8 | TIMESYNC | identificado |
+| 7 | SEND_CLOCK | sample ID + client tick reconstruídos |
+| 8 | TIME_SYNC | ping/RTT + clock offset reconstruídos |
 | 16 | START_LOADING | estrutura reconstruída |
 | 17 | FINISHED_LOADING | identificado |
-| 18 | START_GAME | tamanho/framing identificado; semântica dos 3 u32 ainda em mapeamento |
+| 18 | START_GAME | 3 campos fechados: start-window restante + tempo sincronizado do servidor + estado RNG |
 
 ### DISCOVER
 
@@ -95,7 +95,7 @@ O cliente converte o limite para milissegundos com `time_limit * 60000`.
 ## Ferramentas produzidas
 
 - `blitz_lan_probe.py`: discovery, listener e decoder do framing conhecido.
-- `blitz_lan_mock_server.py`: mock UDP/7891 que responde a DISCOVER e pode emitir LOBBY_LIST experimental após JOIN.
+- `blitz_lan_mock_server.py`: mock UDP/7891 com máquina de estados experimental até `START_GAME` (`--auto-session`), incluindo ACK/sequence básico e sincronização de relógio de uma amostra.
 - `REVIVAL_TEST_GUIDE.md`: procedimento de teste contra o cliente original.
 - `REVIVAL_PROTOCOL_NOTES.md`: notas detalhadas do protocolo.
 - `APPX_INVENTORY.txt`: inventário das 148 entradas do APPX.
