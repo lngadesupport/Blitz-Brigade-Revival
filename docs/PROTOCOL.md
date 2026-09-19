@@ -70,7 +70,7 @@ u32be     LAN application ID = 0x0AB25571
 
 Exact 18-byte datagram:
 
-```text
+``text
 00 00 00 00 00 00 00 00 00 00 00 00 00 01 0a b2 55 71
 ```
 
@@ -134,7 +134,7 @@ repeat client_count times:
   bytes   client name, fixed 20 bytes
   u8      client_details_length
   bytes   client_details
-  u8      slot ID
+  u8       slot ID
 ```
 
 The client-side parser validates the revision, copies host details, clears/rebuilds the lobby client list, and logs `Client received lobby players list from server`.
@@ -153,13 +153,23 @@ Fixed 6 bytes:
 
 ```text
 u8      0x07
-u8      peer/player ID
-u32be   timestamp
+u8      sample ID
+u32be   client tick (GetTickCount timeline)
 ```
 
-### ID 8 — TIMESYNC
+The client echoes the `sample ID` received in `REQ_CLOCK (6)` and attaches its current tick. The original server uses repeated samples to estimate RTT and clock offset.
 
-Fixed 9 bytes: ID + two `u32be`. The client applies the received timing value to its peer clock state; the server logs reception of `MP_MESSAGE_TIMESYNC`.
+### ID 8 — TIME_SYNC
+
+Fixed 9 bytes:
+
+```text
+u8      0x08
+u32be   ping/RTT estimate in milliseconds
+u32be   server-clock minus client-clock offset (modulo u32)
+```
+
+The client stores the negation of the received offset as its local clock base. Subsequent synchronized time calculations therefore evaluate as `GetTickCount - base`, equivalent to `GetTickCount + offset` modulo 2^32.
 
 ### ID 16 — START_LOADING
 
@@ -184,7 +194,16 @@ Fixed 1 byte. The client sends it after loading and logs `Finished loading! -> w
 
 ### ID 18 — START_GAME
 
-Fixed 13 bytes: ID + three `u32be` timing/session values. The server uses a roughly 2000 ms synchronized start delay and sends the packet reliably to each client. Exact gameplay transition semantics of all three fields are still being mapped.
+Fixed 13 bytes:
+
+```text
+u8      0x12
+u32be   synchronized start-window remaining milliseconds
+u32be   server synchronized time at send
+u32be   shared global RNG state/seed
+```
+
+The first field is approximately `2000` on the initial send and counts down if the message is regenerated/re-sent later. The receiving client combines it with `time_sent` and its synchronized clock to reconstruct the same future start marker. The third field is written directly into the game's global LCG state, keeping pseudo-random events deterministic across peers.
 
 ## 6. Reliable UDP behavior reconstructed
 
@@ -270,3 +289,67 @@ The local self-test now reproduces the reconstructed framing consistently:
 ```
 
 This validates our encoder/decoder against the statically reconstructed format. It **does not yet prove acceptance by the original game client**. The next decisive experiment is to run the mock on a second machine/bridged VM and use the game's `Local Wifi Join` screen to discover and select it.
+
+
+## 10. Clock synchronization — reconstructed flow
+
+Static analysis of the base-message dispatcher and send routines closes the loading/clock path:
+
+```text
+server -> client  REQ_CLOCK (6):  sample_id:u8
+client -> server  SEND_CLOCK (7): sample_id:u8 + client_tick:u32be
+server -> client  TIME_SYNC (8):  ping_ms:u32be + clock_offset:u32be
+```
+
+The server samples the client clock repeatedly in the original implementation. For each reply it estimates round-trip time and a server-clock/client-clock offset. `TIME_SYNC` then sends a selected RTT/ping value plus the offset. The client stores the negation of the offset as its local clock base, so later `GetTickCount - base` evaluates to the server-synchronized timeline (modulo2 2^32).
+
+`FINISHED_LOADING (17)` is a reliable, body-less fixed message. On the server it resets the per-client clock-sync state; this is what starts the synchronization phase after map loading.
+
+For the revival mock, a one-sample compatibility approximation is now implemented: one `REQ_CLOCK`, one `SEND_CLOCK`, midpoint RTT/offset estimation, then one reliable `TIME_SYNC`. This is intentionally simpler than the original multi-sample estimator and still needs validation against the real client.
+
+## 11. START_GAME fields closed
+
+The original sender for message 18 serializes exactly three `u32be` values after the ID:
+
+```text
+u32 #1  sync_remaining_ms
+u32 #2  time_sent_ms
+u32 #3  rng_state
+```
+
+The first field is derived from a roughly 2000 ms synchronized-start window. On first send it is approximately `2000`; on retransmission/re-send it decreases as the server's start marker ages. The receiving client combines this value with `time_sent_ms` and its synchronized clock base to reconstruct the same start marker locally.
+
+The third field is conclusively the global pseudo-random generator state. The same global is used by an LCG with constants `0x0019660D` and `0x3C6EF35F`, and the client writes the received third START_GAME value back into that RNG state before gameplay. This keeps deterministic/randomized game events aligned across peers.
+
+## 12. Match configuration offsets confirmed
+
+The configuration block used by `START_LOADINGg is now mapped more strongly:
+
+```text
++0x30FC  game mode ID/index
++0x3100  map ID/index
++0x3104  time limit, minutes
++0x3108  score/frag/goal limit
++0x3110  maximum players
+```
+
+A setup routine takes `(mode, map)` and fills the remaining limits from the game's map/mode configuration tables. `START_LOADING` transmits map, time limit, mode and max players; the score/goal limit is not present in message 16 and is therefore derived locally from the same content/config tables.
+
+## 13. Current experimental session state machine
+
+`blitz_lan_mock_server.py --auto-session` now implements:
+
+```text
+DISCOVER (1)
+  -> SERVER_DETAILS (2)
+CLIENT_DETAILS (3)
+  -> LOBBY_LIST (5, reliable)
+  -> START_LOADING (16, reliable)
+FINISHED_LOADING (17, reliable)
+  -> REQ_CLOCK (6, unreliable)
+SEND_CLOCK (7, unreliable)
+  -> TIME_SYNC (8, reliable)
+  -> START_GAME (18, reliable)
+```
+
+The mock tracks a per-peer reliable sequence, acknowledges the latest reliable client sequence in outgoing packets, computes a modulo-u32 clock offset, and uses a deterministic configurable RNG seed for repeatable tests.

@@ -211,15 +211,25 @@ def decode_packet(data: bytes) -> dict:
 
     elif frame.msg_type == 6:
         if p < limit:
-            out["clock_peer_id"] = data[p]
+            out["clock_sample_id"] = data[p]
             p += 1
 
     elif frame.msg_type == 7:
         if p + 5 <= limit:
-            out["clock_peer_id"] = data[p]
+            out["clock_sample_id"] = data[p]
             p += 1
-            out["clock_timestamp"] = struct.unpack_from(">I", data, p)[0]
+            out["client_tick"] = struct.unpack_from(">I", data, p)[0]
             p += 4
+
+    elif frame.msg_type == 8:
+        if p + 8 <= limit:
+            ping_ms, offset_u32 = struct.unpack_from(">II", data, p)
+            out["time_sync"] = {
+                "ping_ms": ping_ms,
+                "clock_offset_u32": offset_u32,
+                "clock_offset_signed": offset_u32 - 0x100000000 if offset_u32 & 0x80000000 else offset_u32,
+            }
+            p += 8
 
     elif frame.msg_type == 16:
         if p + 8 <= limit:
@@ -232,7 +242,17 @@ def decode_packet(data: bytes) -> dict:
             }
             p += 8
 
-    elif frame.msg_type in (8, 13, 18):
+    elif frame.msg_type == 18:
+        if p + 12 <= limit:
+            sync_remaining_ms, time_sent_ms, rng_state = struct.unpack_from(">III", data, p)
+            out["start_game"] = {
+                "sync_remaining_ms": sync_remaining_ms,
+                "time_sent_ms": time_sent_ms,
+                "rng_state": rng_state,
+            }
+            p += 12
+
+    elif frame.msg_type == 13:
         vals = []
         while p + 4 <= limit:
             vals.append(struct.unpack_from(">I", data, p)[0])
@@ -277,17 +297,30 @@ def print_packet(data: bytes, addr: tuple[str, int] | None = None) -> None:
         print(f"  lobby server details: {d.get('lobby_server_details_hex', '')}")
         for e in d.get("lobby_entries", []):
             print(f"    slot={e['slot_id']} name={e['name']!r} details={e['details_hex']}")
-    if "clock_peer_id" in d:
-        if "clock_timestamp" in d:
-            print(f"  clock: peer_id={d['clock_peer_id']} timestamp={d['clock_timestamp']}")
+    if "clock_sample_id" in d:
+        if "client_tick" in d:
+            print(f"  clock response: sample={d['clock_sample_id']} client_tick={d['client_tick']}")
         else:
-            print(f"  clock request: peer_id={d['clock_peer_id']}")
+            print(f"  clock request: sample={d['clock_sample_id']}")
+    if "time_sync" in d:
+        ts = d["time_sync"]
+        print(
+            f"  time_sync: ping={ts['ping_ms']}ms "
+            f"offset={ts['clock_offset_signed']} (0x{ts['clock_offset_u32']:08x})"
+        )
     if "start_loading" in d:
         sl = d["start_loading"]
         print(
             "  start_loading: "
             f"player_id={sl['player_id']} map_id={sl['map_id']} "
             f"time={sl['time_limit_minutes']}min mode_id={sl['mode_id']} max={sl['max_players']}"
+        )
+    if "start_game" in d:
+        sg = d["start_game"]
+        print(
+            "  start_game: "
+            f"sync_remaining={sg['sync_remaining_ms']}ms "
+            f"time_sent={sg['time_sent_ms']} rng_state=0x{sg['rng_state']:08x}"
         )
     if "u32be_values" in d:
         print(f"  u32be: {d['u32be_values']}")

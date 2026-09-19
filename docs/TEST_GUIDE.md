@@ -138,4 +138,39 @@ client -> FINISHED_LOADING
 server -> START_GAME
 ```
 
-The 32-bit field in `START_LOADING` has now been identified as the match time limit in minutes. The game converts it internally with `time_limit * 60000`. Remaining compatibility work is therefore centered on the real JOIN/lobby payloads, clock synchronization and the exact three timing/session values in `START_GAME`.
+The 32-bit field in `START_LOADING` is the match time limit in minutes; the game converts it internally with `time_limit * 60000`. The base clock path is now reconstructed as `REQ_CLOCK(sample) -> SEND_CLOCK(sample, client_tick) -> TIME_SYNC(ping, offset)`, and `START_GAME` is now decoded as a synchronized start-window value, server synchronized send time, and shared RNG state. Remaining compatibility work is centered on how the real client accepts these reconstructed packets and on the gameplay messages that follow the synchronized start.
+
+
+## Automated session experiment
+
+A newer experimental path can attempt the complete base-session handshake automatically:
+
+```text
+py blitz_lan_mock_server.py --auto-session
+```
+
+After a real client sends `CLIENT_DETAILS/JOIN`, the server will:
+
+1. send `LOBBY_LIST`;
+2. wait 1 second by default;
+3. send reliable `START_LOADING`;
+4. wait for reliable `FINISHED_LOADING`;
+5. send one `REQ_CLOCK`;
+6. use the client's `SEND_CLOCK` reply to estimate RTT and clock offset;
+7. send reliable `TIME_SYNC`;
+8. send reliable `START_GAME` shortly afterward.
+
+Useful options:
+
+```text
+--map 0
+--mode 0
+--player-id 0
+--max-players 12
+--time-limit 10
+--rng-seed 0x12345678
+--start-delay 1.0
+--start-game-delay 0.20
+```
+
+This state machine is validated against the reconstructed encoder/decoder and a synthetic client, but it is **not yet proof that the original game accepts every stage**. When testing with the actual game, preserve the complete server log; the first stage where the client stops advancing will identify the next compatibility issue.
