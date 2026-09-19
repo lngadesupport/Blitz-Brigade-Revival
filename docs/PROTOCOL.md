@@ -301,7 +301,7 @@ client -> server  SEND_CLOCK (7): sample_id:u8 + client_tick:u32be
 server -> client  TIME_SYNC (8):  ping_ms:u32be + clock_offset:u32be
 ```
 
-The server samples the client clock repeatedly in the original implementation. For each reply it estimates round-trip time and a server-clock/client-clock offset. `TIME_SYNC` then sends a selected RTT/ping value plus the offset. The client stores the negation of the offset as its local clock base, so later `GetTickCount - base` evaluates to the server-synchronized timeline (modulo2 2^32).
+The server samples the client clock repeatedly in the original implementation. For each reply it estimates round-trip time and a server-clock/client-clock offset. `TIME_SYNC` then sends a selected RTT/ping value plus the offset. The client stores the negation of the offset as its local clock base, so later `GetTickCount - base` evaluates to the server-synchronized timeline (modulo 2^32).
 
 `FINISHED_LOADING (17)` is a reliable, body-less fixed message. On the server it resets the per-client clock-sync state; this is what starts the synchronization phase after map loading.
 
@@ -323,7 +323,7 @@ The third field is conclusively the global pseudo-random generator state. The sa
 
 ## 12. Match configuration offsets confirmed
 
-The configuration block used by `START_LOADINGg is now mapped more strongly:
+The configuration block used by `START_LOADING` is now mapped more strongly:
 
 ```text
 +0x30FC  game mode ID/index
