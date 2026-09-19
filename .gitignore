@@ -1,0 +1,35 @@
+# Original/proprietary game packages and archives
+*.appx
+*.Appx
+*.msix
+*.rar
+*.7z
+*.zip
+
+# Original binaries/assets
+*.exe
+*.dll
+*.winmd
+*.gla
+*.pak
+*.pri
+*.xbf
+
+# Packet captures / local analysis output
+*.pcap
+*.pcapng
+captures/
+analysis/
+appx_analysis/
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# OS/editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
